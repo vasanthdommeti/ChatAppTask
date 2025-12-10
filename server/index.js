@@ -6,6 +6,18 @@ const io = new Server(3000, {
     },
 });
 
+const admin = require("firebase-admin");
+let serviceAccount;
+try {
+    serviceAccount = require("./serviceAccountKey.json");
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+    });
+    console.log("Firebase Admin initialized");
+} catch (error) {
+    console.warn("Firebase Admin NOT initialized. Missing or invalid serviceAccountKey.json");
+}
+
 let onlineUsers = new Map(); // userId -> socketId
 
 io.on("connection", (socket) => {
@@ -43,11 +55,42 @@ io.on("connection", (socket) => {
 
         // Acknowledge sent
         socket.emit("message_sent", { messageId: message._id, status: "sent" });
+
+        // Push Notification via FCM
+        if (recipientId && admin.apps.length > 0) {
+            admin.firestore().collection('users').doc(recipientId).get()
+                .then(doc => {
+                    if (doc.exists) {
+                        const token = doc.data().fcmToken;
+                        if (token) {
+                            const payload = {
+                                token: token,
+                                notification: {
+                                    title: msgData.user.name || "New Message",
+                                    body: msgData.text || "Sent an image",
+                                },
+                                data: {
+                                    chatId: chatId || "",
+                                }
+                            };
+                            admin.messaging().send(payload)
+                                .then(response => console.log("FCM sent:", response))
+                                .catch(error => console.error("FCM error:", error));
+                        }
+                    }
+                })
+                .catch(err => console.error("Firestore error:", err));
+        }
     });
 
     // Typing indicator
     socket.on("typing", ({ chatId, userId, isTyping }) => {
         socket.to(chatId).emit("user_typing", { userId, isTyping });
+    });
+
+    // Message Delivered
+    socket.on("message_delivered", ({ messageId, chatId }) => {
+        socket.to(chatId).emit("message_status_update", { messageId, status: "delivered" });
     });
 
     // Handle disconnect

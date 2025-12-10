@@ -7,20 +7,20 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth, firestore } from './src/config/firebase';
 import { setUser, setHydrated, logout } from './src/store/slices/authSlice';
 import socketService from './src/services/socketService';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { registerForPushNotificationsAsync } from './src/services/notificationService';
 import * as SplashScreen from 'expo-splash-screen';
 import { store } from './src/store';
 
 // Keep splash screen visible until we decide to hide
-SplashScreen.preventAutoHideAsync().catch(() => {});
+SplashScreen.preventAutoHideAsync().catch(() => { });
 
 // Component to handle auth state subscription
 const AuthListener = () => {
   const dispatch = useDispatch();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       // Hydration should not wait on network calls
       dispatch(setHydrated(true));
 
@@ -41,10 +41,10 @@ const AuthListener = () => {
       socketService.connect();
       socketService.emit('user_online', user.uid);
 
-      // Update persistence (fire-and-forget)
-      updateDoc(doc(firestore, 'users', user.uid), {
+      // Update persistence
+      await setDoc(doc(firestore, 'users', user.uid), {
         isOnline: true
-      }).catch(e => console.error('Presence update failed', e));
+      }, { merge: true }).catch(e => console.error('Presence update failed', e));
 
       // Register for push notifications (do not block UI)
       registerForPushNotificationsAsync(user.uid).catch(e => console.error('Push registration failed', e));
@@ -63,27 +63,27 @@ const AuthListener = () => {
 
   // App State Listener for Presence
   useEffect(() => {
-     const subscription = AppState.addEventListener('change', async (nextAppState) => {
-        const user = auth.currentUser;
-        if (user) {
-            if (nextAppState === 'active') {
-                 await updateDoc(doc(firestore, 'users', user.uid), {
-                    isOnline: true,
-                });
-                socketService.emit('user_online', user.uid);
-            } else {
-                await updateDoc(doc(firestore, 'users', user.uid), {
-                    isOnline: false,
-                    lastSeen: serverTimestamp()
-                });
-                // Optional: disconnect socket or keep it open for background (iOS limits this)
-            }
+    const subscription = AppState.addEventListener('change', async (nextAppState) => {
+      const user = auth.currentUser;
+      if (user) {
+        if (nextAppState === 'active') {
+          await setDoc(doc(firestore, 'users', user.uid), {
+            isOnline: true,
+          }, { merge: true });
+          socketService.emit('user_online', user.uid);
+        } else {
+          await setDoc(doc(firestore, 'users', user.uid), {
+            isOnline: false,
+            lastSeen: serverTimestamp()
+          }, { merge: true });
+          // Optional: disconnect socket or keep it open for background (iOS limits this)
         }
-     });
+      }
+    });
 
-     return () => {
-         subscription.remove();
-     };
+    return () => {
+      subscription.remove();
+    };
   }, []);
 
   return <AppNavigator />;

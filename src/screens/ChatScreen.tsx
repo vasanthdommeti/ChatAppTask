@@ -1,18 +1,22 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, KeyboardAvoidingView, Platform } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
-import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, setDoc, increment, updateDoc, getDoc } from 'firebase/firestore';
 import { firestore, storage } from '../config/firebase';
 import socketService from '../services/socketService';
 import InputToolbar from '../components/InputToolbar';
 import ChatBubble from '../components/ChatBubble';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { TouchableOpacity, Image } from 'react-native';
 import { RootState } from '../store';
 import { addMessage, setMessages, updateMessageStatus } from '../store/slices/chatSlice';
 
 const ChatScreen = ({ route, navigation }: any) => {
     const { userId, userName } = route.params;
+    const insets = useSafeAreaInsets();
     const dispatch = useDispatch();
     const currentUser = useSelector((state: RootState) => state.auth.user);
     const messages = useSelector((state: RootState) => state.chat.messages);
@@ -70,17 +74,34 @@ const ChatScreen = ({ route, navigation }: any) => {
         };
     }, [chatId, currentUser?.uid, dispatch, userId, userName]);
 
+    // Reset unread count when entering chat
+    useEffect(() => {
+        const resetUnread = async () => {
+            const chatRef = doc(firestore, 'chats', chatId);
+            await setDoc(chatRef, {
+                [`unreadCount_${currentUser!.uid}`]: 0
+            }, { merge: true });
+        };
+        resetUnread();
+    }, [chatId, currentUser]);
+
     const handleSend = async (text: string, image?: string) => {
         let imageUrl = '';
 
         if (image) {
+            console.log("Uploading image:", image);
             // Upload image
             try {
                 const response = await fetch(image);
                 const blob = await response.blob();
+
                 const filename = image.substring(image.lastIndexOf('/') + 1);
                 const storageRef = ref(storage, `images/${filename}`);
-                await uploadBytes(storageRef, blob);
+
+                await uploadBytes(storageRef, blob, {
+                    contentType: 'image/jpeg',
+                });
+
                 imageUrl = await getDownloadURL(storageRef);
             } catch (e) {
                 console.error("Upload failed", e);
@@ -112,18 +133,27 @@ const ChatScreen = ({ route, navigation }: any) => {
         // I'll rely on Firestore for local echo to keep ID consistent unless valid network delay. 
         // But to satisfy "Socket for faster delivery", I should probably show it immediately.
 
-        // 3. Save to Firestore
+        // 3. Save to Firestore (Messages)
         const { _id, chatId: cid, ...firestoreData } = messageData;
         await addDoc(collection(firestore, 'chats', chatId, 'messages'), {
             ...firestoreData,
             createdAt: serverTimestamp(),
             sent: true
         });
+
+        // 4. Update Chat Summary (Last Message & Unread)
+        const chatRef = doc(firestore, 'chats', chatId);
+        await setDoc(chatRef, {
+            lastMessage: image ? '📷 Image' : text,
+            lastMessageTime: serverTimestamp(),
+            participants: [currentUser!.uid, userId],
+            [`unreadCount_${userId}`]: increment(1)
+        }, { merge: true });
     };
 
     const handlePickImage = async () => {
         let result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            mediaTypes: ['images'], // Updated to string array
             allowsEditing: true,
             aspect: [4, 3],
             quality: 0.5,
@@ -139,47 +169,75 @@ const ChatScreen = ({ route, navigation }: any) => {
     };
 
     return (
-        <KeyboardAvoidingView
-            style={styles.container}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={90}
-        >
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>{userName}</Text>
+        <View style={[styles.container, { paddingBottom: insets.bottom }]}>
+            <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                    <Ionicons name="chevron-back" size={28} color="#fff" />
+                </TouchableOpacity>
+                <View style={styles.headerInfo}>
+                    <Text style={styles.headerTitle}>{userName}</Text>
+                    {/* Add online status or typing indicator subtitle here if available */}
+                </View>
+                <TouchableOpacity style={styles.headerAction}>
+                    <Ionicons name="videocam-outline" size={24} color="#fff" />
+                </TouchableOpacity>
             </View>
-            <FlatList
-                ref={flatListRef}
-                data={messages}
-                keyExtractor={item => item._id}
-                renderItem={({ item }) => <ChatBubble message={item} isCurrentUser={item.user._id === currentUser!.uid} />}
-                inverted
-                contentContainerStyle={styles.list}
-            />
-            <InputToolbar onSend={handleSend} onPickImage={handlePickImage} onTyping={handleTyping} />
-        </KeyboardAvoidingView>
+
+            <KeyboardAvoidingView
+                style={styles.keyboardView}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+            >
+                <FlatList
+                    ref={flatListRef}
+                    data={messages}
+                    keyExtractor={item => item._id}
+                    renderItem={({ item }) => <ChatBubble message={item} isCurrentUser={item.user._id === currentUser!.uid} />}
+                    inverted
+                    contentContainerStyle={styles.list}
+                    showsVerticalScrollIndicator={false}
+                />
+                <InputToolbar onSend={handleSend} onPickImage={handlePickImage} onTyping={handleTyping} />
+            </KeyboardAvoidingView>
+        </View>
     );
 };
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#121212',
+        backgroundColor: '#0F0F0F', // Deeper black
     },
     header: {
-        padding: 16,
-        paddingTop: 60,
-        backgroundColor: '#1E1E1E',
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingBottom: 16,
+        backgroundColor: '#1A1A1A',
         borderBottomWidth: 1,
-        borderBottomColor: '#333',
-        alignItems: 'center'
+        borderBottomColor: '#2A2A2A',
+        zIndex: 10,
+    },
+    backButton: {
+        marginRight: 12,
+    },
+    headerInfo: {
+        flex: 1,
     },
     headerTitle: {
         color: 'white',
-        fontWeight: 'bold',
-        fontSize: 18
+        fontWeight: '700',
+        fontSize: 18,
+    },
+    headerAction: {
+        padding: 8,
+    },
+    keyboardView: {
+        flex: 1,
     },
     list: {
-        padding: 16,
+        paddingHorizontal: 16,
+        paddingVertical: 16,
     },
 });
 
