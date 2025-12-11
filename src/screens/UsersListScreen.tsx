@@ -1,39 +1,63 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Image, Alert } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { firestore } from '../config/firebase';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { auth } from '../config/firebase';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import socketService from '../services/socketService';
-import { setUsers, clearUsers, updateUserPresence } from '../store/slices/usersSlice';
-import { logout } from '../store/slices/authSlice';
-import { setActiveChat, setMessages } from '../store/slices/chatSlice';
+import { setUsers, updateUserPresence, setUnreadTotal } from '../store/slices/usersSlice';
 import { RootState } from '../store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import ChatListSkeleton from '../components/ChatListSkeleton';
+import { useRef } from 'react';
 
 const UsersListScreen = ({ navigation }: any) => {
     const dispatch = useDispatch();
     const insets = useSafeAreaInsets();
     const users = useSelector((state: RootState) => state.users.users);
     const currentUser = useSelector((state: RootState) => state.auth.user);
+    const loadStartRef = useRef<number | null>(null);
     const [chatData, setChatData] = React.useState<any>({});
     const [loadingUsers, setLoadingUsers] = useState(true);
+    const [firstSnapshotReceived, setFirstSnapshotReceived] = useState(false);
+    const [emptyDelayElapsed, setEmptyDelayElapsed] = useState(false);
+    const emptyTimer = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
         // Real-time listener for users
+        setLoadingUsers(true);
+        setFirstSnapshotReceived(false);
+        setEmptyDelayElapsed(false);
+        if (emptyTimer.current) {
+            clearTimeout(emptyTimer.current);
+            emptyTimer.current = null;
+        }
+        loadStartRef.current = Date.now();
+        console.log('[UsersList] start listening', { uid: currentUser?.uid, at: loadStartRef.current });
         const q = query(collection(firestore, 'users'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
+            if (emptyTimer.current) {
+                clearTimeout(emptyTimer.current);
+                emptyTimer.current = null;
+            }
             const usersList: any[] = [];
             snapshot.forEach((doc) => {
                 if (doc.id !== currentUser?.uid) {
                     usersList.push({ ...doc.data(), uid: doc.id });
                 }
             });
+            const took = loadStartRef.current ? Date.now() - loadStartRef.current : null;
+            console.log('[UsersList] snapshot', { count: usersList.length, tookMs: took });
             dispatch(setUsers(usersList));
             setLoadingUsers(false);
+            setFirstSnapshotReceived(true);
+            if (usersList.length === 0) {
+                // Delay empty state to avoid flicker before data arrives
+                setEmptyDelayElapsed(false);
+                emptyTimer.current = setTimeout(() => setEmptyDelayElapsed(true), 8000);
+                console.log('[UsersList] scheduled empty state in 8000ms');
+            } else {
+                setEmptyDelayElapsed(false);
+            }
         });
 
         // Socket listener for real-time status updates
@@ -44,8 +68,11 @@ const UsersListScreen = ({ navigation }: any) => {
         return () => {
             unsubscribe();
             socketService.off('status_update');
+            if (emptyTimer.current) {
+                clearTimeout(emptyTimer.current);
+                emptyTimer.current = null;
+            }
         };
-        return () => unsubscribe();
     }, [currentUser?.uid, dispatch]);
 
     // Listen for Chat Metadata (Last Message, Unread)
@@ -54,34 +81,19 @@ const UsersListScreen = ({ navigation }: any) => {
         const q = query(collection(firestore, 'chats'), where('participants', 'array-contains', currentUser.uid));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const data: any = {};
+            let unreadTotal = 0;
             snapshot.forEach(doc => {
-                data[doc.id] = doc.data();
+                const chat = doc.data();
+                const key = `unreadCount_${currentUser.uid}`;
+                const unread = typeof chat[key] === 'number' ? chat[key] : 0;
+                unreadTotal += unread;
+                data[doc.id] = chat;
             });
             setChatData(data);
+            dispatch(setUnreadTotal(unreadTotal));
         });
         return () => unsubscribe();
-    }, [currentUser?.uid]);
-
-    const handleLogout = async () => {
-        // Instant local logout so UI flips even if network is down
-        dispatch(logout());
-        dispatch(setActiveChat(null));
-        dispatch(setMessages([]));
-        dispatch(clearUsers());
-        socketService.disconnect();
-
-        if (currentUser?.uid) {
-            setDoc(doc(firestore, 'users', currentUser.uid), {
-                isOnline: false,
-                lastSeen: serverTimestamp()
-            }, { merge: true }).catch(err => console.error("Failed to set offline:", err));
-        }
-
-        auth.signOut().catch((error) => {
-            console.error("Logout error:", error);
-            Alert.alert("Logout Error", "We signed you out locally but failed to sign out of Firebase.");
-        });
-    };
+    }, [currentUser?.uid, dispatch]);
 
     const renderItem = ({ item }: any) => {
         if (!currentUser) return null;
@@ -121,23 +133,31 @@ const UsersListScreen = ({ navigation }: any) => {
         );
     };
 
+    const showSkeleton = loadingUsers || !firstSnapshotReceived || (users.length === 0 && !emptyDelayElapsed);
+    const showEmpty = users.length === 0 && emptyDelayElapsed;
+
     return (
         <View style={[styles.container, { paddingTop: insets.top }]}>
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>Chats</Text>
-                <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-                    <Ionicons name="log-out-outline" size={24} color="#FF4444" />
-                </TouchableOpacity>
             </View>
-            {loadingUsers ? (
+            {showSkeleton ? (
                 <ChatListSkeleton />
             ) : (
-                <FlatList
-                    data={users}
-                    renderItem={renderItem}
-                    keyExtractor={item => item.uid}
-                    contentContainerStyle={styles.list}
-                />
+                <>
+                    {showEmpty ? (
+                        <View style={[styles.list, styles.emptyState]}>
+                            <Text style={styles.emptyText}>No users yet. Invite someone to start chatting.</Text>
+                        </View>
+                    ) : (
+                        <FlatList
+                            data={users}
+                            renderItem={renderItem}
+                            keyExtractor={item => item.uid}
+                            contentContainerStyle={styles.list}
+                        />
+                    )}
+                </>
             )}
         </View>
     );
@@ -168,6 +188,15 @@ const styles = StyleSheet.create({
     },
     list: {
         padding: 16,
+    },
+    emptyState: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        flex: 1,
+    },
+    emptyText: {
+        color: '#888',
+        fontSize: 14,
     },
     userItem: {
         flexDirection: 'row',

@@ -33,7 +33,26 @@
     },
     "plugins": [
       "expo-web-browser",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app accesses your photos to let you share them with your friends."
+        }
+      ],
+      [
+        "react-native-fbsdk-next",
+        {
+          "appID": "862268099520653",
+          "clientToken": "CLIENT_TOKEN",
+          "displayName": "chatapp",
+          "scheme": "fb862268099520653",
+          "advertiserIDCollectionEnabled": false,
+          "autoLogAppEventsEnabled": false,
+          "isAutoInitEnabled": true,
+          "iosUserTrackingPermission": "This identifier will be used to deliver personalized ads to you."
+        }
+      ]
     ],
     "extra": {
       "projectId": "chatapp-ccae8"

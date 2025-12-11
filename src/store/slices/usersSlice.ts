@@ -12,11 +12,13 @@ export interface IUserProfile {
 interface UsersState {
     users: IUserProfile[];
     loadingUsers: boolean;
+    unreadTotal: number;
 }
 
 const initialState: UsersState = {
     users: [],
     loadingUsers: false,
+    unreadTotal: 0,
 };
 
 const usersSlice = createSlice({
@@ -40,9 +42,13 @@ const usersSlice = createSlice({
         clearUsers: (state) => {
             state.users = [];
             state.loadingUsers = false;
+            state.unreadTotal = 0;
+        },
+        setUnreadTotal: (state, action: PayloadAction<number>) => {
+            state.unreadTotal = action.payload;
         }
     },
 });
 
-export const { setUsers, updateUserPresence, setLoadingUsers, clearUsers } = usersSlice.actions;
+export const { setUsers, updateUserPresence, setLoadingUsers, clearUsers, setUnreadTotal } = usersSlice.actions;
 export default usersSlice.reducer;

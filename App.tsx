@@ -35,18 +35,16 @@ const AuthListener = () => {
       return;
     }
     const { userId, userName } = pendingNavigation.current;
-    navigationRef.navigate('Chat' as never, { userId, userName: userName || 'Chat' } as never);
+    navigationRef.navigate('Chat', { userId, userName: userName || 'Chat' });
     pendingNavigation.current = null;
   };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      // Hydration should not wait on network calls
-      dispatch(setHydrated(true));
-
       if (!user) {
         dispatch(logout());
         socketService.disconnect();
+        dispatch(setHydrated(true));
         return;
       }
 
@@ -56,6 +54,7 @@ const AuthListener = () => {
         displayName: user.displayName,
         photoURL: user.photoURL,
       }));
+      dispatch(setHydrated(true));
 
       // Connect Socket (idempotent)
       socketService.connect();

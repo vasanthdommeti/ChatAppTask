@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, FacebookAuthProvider, signInWithCredential } from 'firebase/auth';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
+import { LoginManager, AccessToken } from 'react-native-fbsdk-next';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, firestore } from '../config/firebase';
 import { setUser, setLoading, setError } from '../store/slices/authSlice';
@@ -18,6 +19,7 @@ const LoginScreen = () => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isLogin, setIsLogin] = useState(true);
+    const [sdkInitializing, setSdkInitializing] = useState(true);
     const dispatch = useDispatch();
     const { isLoading, error } = useSelector((state: RootState) => state.auth);
 
@@ -28,6 +30,16 @@ const LoginScreen = () => {
         iosClientId: '472937748430-qmbj603lfuar607g37mb87p0a0spirl5.apps.googleusercontent.com',
         androidClientId: '472937748430-4p245dojdpc4nqema2l14sb5ubvsuohs.apps.googleusercontent.com',
     });
+
+    // Consider both Google and (future) Facebook SDK readiness; fallback timeout avoids deadlocks
+    useEffect(() => {
+        if (request) setSdkInitializing(false);
+    }, [request]);
+    
+    useEffect(() => {
+        const timeout = setTimeout(() => setSdkInitializing(false), 2000);
+        return () => clearTimeout(timeout);
+    }, []);
 
     React.useEffect(() => {
         if (response?.type === 'success') {
@@ -106,15 +118,54 @@ const LoginScreen = () => {
         }
     };
 
-    const handleSocialLogin = (provider: string) => {
+    const handleSocialLogin = async (provider: string) => {
         if (provider === 'Google') {
             if (!request) {
                 Alert.alert('Error', 'Google Login not ready. Check Client ID.');
                 return;
             }
             promptAsync();
-        } else {
-            Alert.alert('Not Implemented', `${provider} login requires native configuration.`);
+        } else if (provider === 'Facebook') {
+            try {
+                const result = await LoginManager.logInWithPermissions(['public_profile', 'email']);
+                if (result.isCancelled) {
+                    return;
+                }
+
+                const data = await AccessToken.getCurrentAccessToken();
+                if (!data) {
+                    throw new Error('Something went wrong obtaining access token');
+                }
+
+                dispatch(setLoading(true));
+                const credential = FacebookAuthProvider.credential(data.accessToken);
+                const userCredential = await signInWithCredential(auth, credential);
+
+                const user = userCredential.user;
+                const userData = {
+                    uid: user.uid,
+                    email: user.email,
+                    displayName: user.displayName || 'Facebook User',
+                    photoURL: user.photoURL + '?height=500', // standard generic fb graph param
+                    isOnline: true,
+                    lastSeen: serverTimestamp(),
+                };
+
+                await setDoc(doc(firestore, 'users', user.uid), userData, { merge: true });
+
+                dispatch(setUser({
+                    uid: user.uid,
+                    email: user.email,
+                    displayName: userData.displayName,
+                    photoURL: userData.photoURL,
+                }));
+
+            } catch (error: any) {
+                dispatch(setError(error.message));
+                Alert.alert('Facebook Login Error', error.message);
+            } finally {
+                dispatch(setLoading(false));
+            }
         }
     };
 
@@ -123,6 +174,14 @@ const LoginScreen = () => {
             style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
+            {sdkInitializing && (
+                <View style={styles.sdkOverlay}>
+                    <View style={styles.sdkSpinner}>
+                        <ActivityIndicator size="large" color="#6C63FF" />
+                        <Text style={styles.sdkText}>Initializing Google & Facebook</Text>
+                    </View>
+                </View>
+            )}
             <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
                 <View style={styles.header}>
                     <Text style={styles.title}>Welcome Back</Text>
@@ -319,6 +378,26 @@ const styles = StyleSheet.create({
         color: '#6C63FF',
         fontWeight: '700',
     },
+    sdkOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 20,
+    },
+    sdkSpinner: {
+        backgroundColor: '#1A1A1A',
+        padding: 24,
+        borderRadius: 16,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#2A2A2A',
+    },
+    sdkText: {
+        color: '#fff',
+        marginTop: 12,
+        fontWeight: '600',
+    }
 });
 
 export default LoginScreen;
