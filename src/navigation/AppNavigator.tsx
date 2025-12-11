@@ -7,6 +7,7 @@ import LoginScreen from '../screens/LoginScreen';
 import UsersListScreen from '../screens/UsersListScreen';
 import ChatScreen from '../screens/ChatScreen'; // Will create this next
 import * as SplashScreen from 'expo-splash-screen';
+import { navigationRef } from './navigationRef';
 
 const Stack = createStackNavigator();
 
@@ -25,7 +26,7 @@ const AppNavigator = () => {
     }
 
     return (
-        <NavigationContainer>
+        <NavigationContainer ref={navigationRef}>
             <Stack.Navigator screenOptions={{ headerShown: false, cardStyle: { backgroundColor: '#121212' } }}>
                 {isAuthenticated ? (
                     <>

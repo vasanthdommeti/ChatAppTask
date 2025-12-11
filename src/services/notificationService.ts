@@ -2,12 +2,12 @@ import { Platform } from 'react-native';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import { firestore } from '../config/firebase';
 
 Notifications.setNotificationHandler({
     handleNotification: async () => ({
-        shouldShowAlert: true,
+        shouldShowAlert: false,
         shouldPlaySound: true,
         shouldSetBadge: false,
         shouldShowBanner: true,
@@ -16,7 +16,10 @@ Notifications.setNotificationHandler({
 });
 
 export async function registerForPushNotificationsAsync(userId: string) {
-    let token;
+    console.log('registerForPushNotificationsAsync start', { userId, platform: Platform.OS, isDevice: Device.isDevice });
+    let token: string | undefined;
+    let expoPushToken: string | undefined;
+    let devicePushToken: string | undefined;
 
     if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('default', {
@@ -27,40 +30,60 @@ export async function registerForPushNotificationsAsync(userId: string) {
         });
     }
 
-    if (Device.isDevice) {
-        const { status: existingStatus } = await Notifications.getPermissionsAsync();
-        let finalStatus = existingStatus;
-        if (existingStatus !== 'granted') {
-            const { status } = await Notifications.requestPermissionsAsync();
-            finalStatus = status;
+    // iOS simulators cannot receive push; allow Android emulators to proceed
+    if (Platform.OS === 'ios' && !Device.isDevice) {
+        console.log('iOS simulator cannot receive push notifications');
+        return;
+    }
+
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+    if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+    }
+    if (finalStatus !== 'granted') {
+        console.log('Failed to get push token for push notification!', { finalStatus });
+        return;
+    }
+
+    try {
+        // Project ID from Constants or hardcoded if strictly needed, usually inferred
+        const projectId =
+            Constants.expoConfig?.extra?.eas?.projectId ||
+            Constants.easConfig?.projectId ||
+            Constants.expoConfig?.extra?.projectId;
+
+        // Only call Expo token if we have a valid EAS project UUID; otherwise skip to avoid 400 errors.
+        const isUuid = projectId ? /^[0-9a-fA-F-]{36}$/.test(projectId) : false;
+        if (isUuid) {
+            expoPushToken = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
         }
-        if (finalStatus !== 'granted') {
-            console.log('Failed to get push token for push notification!');
-            return;
-        }
+        devicePushToken = (await Notifications.getDevicePushTokenAsync()).data as string | undefined;
 
-        // Get the token that identifies this device
-        // Note: In a bare workflow or custom dev client you might need getDevicePushTokenAsync
-        // For Expo Go / EAS Build, getExpoPushTokenAsync is common but for FCM strictly we want getDevicePushTokenAsync sometimes
-        // But since using generic Firebase Cloud Messaging, we usually want the FCM token.
-        // Expo's getDevicePushTokenAsync returns the native FCM token on Android.
+        console.log('Push tokens for user', userId, {
+            projectId,
+            expoPushToken,
+            devicePushToken,
+            finalStatus,
+        });
 
-        try {
-            // Project ID from Constants or hardcoded if strictly needed, usually inferred
-            const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
-            token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+        // Prefer native/device token for FCM/APNs, fall back to Expo token if present
+        token = devicePushToken || expoPushToken;
 
-            // Save to Firestore
-            await updateDoc(doc(firestore, 'users', userId), {
-                fcmToken: token
-            });
+        // Build payload omitting undefined values to satisfy Firestore
+        const payload: Record<string, any> = {
+            pushPlatform: Platform.OS,
+        };
+        if (token) payload.fcmToken = token;
+        if (expoPushToken) payload.expoPushToken = expoPushToken;
+        if (devicePushToken) payload.devicePushToken = devicePushToken;
 
-        } catch (e) {
-            console.error("Error fetching token", e);
-        }
+        // Save to Firestore (merge to avoid overwriting profile data)
+        await setDoc(doc(firestore, 'users', userId), payload, { merge: true });
 
-    } else {
-        console.log('Must use physical device for Push Notifications');
+    } catch (e) {
+        console.error("Error fetching token", e);
     }
 
     return token;

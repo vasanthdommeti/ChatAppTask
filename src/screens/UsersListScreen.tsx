@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Image, Alert } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { firestore } from '../config/firebase';
@@ -12,6 +12,7 @@ import { setActiveChat, setMessages } from '../store/slices/chatSlice';
 import { RootState } from '../store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import ChatListSkeleton from '../components/ChatListSkeleton';
 
 const UsersListScreen = ({ navigation }: any) => {
     const dispatch = useDispatch();
@@ -19,6 +20,7 @@ const UsersListScreen = ({ navigation }: any) => {
     const users = useSelector((state: RootState) => state.users.users);
     const currentUser = useSelector((state: RootState) => state.auth.user);
     const [chatData, setChatData] = React.useState<any>({});
+    const [loadingUsers, setLoadingUsers] = useState(true);
 
     useEffect(() => {
         // Real-time listener for users
@@ -31,6 +33,7 @@ const UsersListScreen = ({ navigation }: any) => {
                 }
             });
             dispatch(setUsers(usersList));
+            setLoadingUsers(false);
         });
 
         // Socket listener for real-time status updates
@@ -81,7 +84,8 @@ const UsersListScreen = ({ navigation }: any) => {
     };
 
     const renderItem = ({ item }: any) => {
-        const chatId = currentUser!.uid < item.uid
+        if (!currentUser) return null;
+        const chatId = currentUser.uid < item.uid
             ? `${currentUser!.uid}_${item.uid}`
             : `${item.uid}_${currentUser!.uid}`;
         const chat = chatData[chatId];
@@ -112,6 +116,7 @@ const UsersListScreen = ({ navigation }: any) => {
                         )}
                     </View>
                 </View>
+                <View style={[styles.indicator, { backgroundColor: item.isOnline ? '#4CAF50' : '#888' }]} />
             </TouchableOpacity>
         );
     };
@@ -124,12 +129,16 @@ const UsersListScreen = ({ navigation }: any) => {
                     <Ionicons name="log-out-outline" size={24} color="#FF4444" />
                 </TouchableOpacity>
             </View>
-            <FlatList
-                data={users}
-                renderItem={renderItem}
-                keyExtractor={item => item.uid}
-                contentContainerStyle={styles.list}
-            />
+            {loadingUsers ? (
+                <ChatListSkeleton />
+            ) : (
+                <FlatList
+                    data={users}
+                    renderItem={renderItem}
+                    keyExtractor={item => item.uid}
+                    contentContainerStyle={styles.list}
+                />
+            )}
         </View>
     );
 };

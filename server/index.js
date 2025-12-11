@@ -27,7 +27,24 @@ io.on("connection", (socket) => {
     socket.on("user_online", (userId) => {
         onlineUsers.set(userId, socket.id);
         io.emit("status_update", { userId, isOnline: true });
+        if (admin.apps.length > 0) {
+            admin.firestore().collection('users').doc(userId).set({
+                isOnline: true,
+                lastSeen: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true }).catch(() => {});
+        }
         console.log(`User ${userId} is online`);
+    });
+
+    socket.on("user_offline", (userId) => {
+        onlineUsers.delete(userId);
+        io.emit("status_update", { userId, isOnline: false, lastSeen: Date.now() });
+        if (admin.apps.length > 0) {
+            admin.firestore().collection('users').doc(userId).set({
+                isOnline: false,
+                lastSeen: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true }).catch(() => {});
+        }
     });
 
     // Join a specific chat room (optional, depending on architecture)
@@ -54,30 +71,41 @@ io.on("connection", (socket) => {
         }
 
         // Acknowledge sent
-        socket.emit("message_sent", { messageId: message._id, status: "sent" });
+        socket.emit("message_sent", { messageId: message._id, status: "sent", chatId });
 
         // Push Notification via FCM
         if (recipientId && admin.apps.length > 0) {
             admin.firestore().collection('users').doc(recipientId).get()
                 .then(doc => {
-                    if (doc.exists) {
-                        const token = doc.data().fcmToken;
-                        if (token) {
-                            const payload = {
-                                token: token,
-                                notification: {
-                                    title: msgData.user.name || "New Message",
-                                    body: msgData.text || "Sent an image",
-                                },
-                                data: {
-                                    chatId: chatId || "",
-                                }
-                            };
-                            admin.messaging().send(payload)
-                                .then(response => console.log("FCM sent:", response))
-                                .catch(error => console.error("FCM error:", error));
-                        }
+                    if (!doc.exists) {
+                        console.warn("Recipient not found for push", recipientId);
+                        return;
                     }
+                    const data = doc.data() || {};
+                    // Prefer native device token, fall back to stored fcmToken, ignore Expo token here
+                    const token = data.devicePushToken || data.fcmToken;
+                    if (!token) {
+                        console.warn("No device token for recipient", recipientId);
+                        return;
+                    }
+
+                    const payload = {
+                        token,
+                        notification: {
+                            title: msgData.user?.name || "New Message",
+                            body: msgData.text || "Sent an image",
+                        },
+                        data: {
+                            chatId: chatId || "",
+                            senderId: msgData.user?._id || "",
+                            senderName: msgData.user?.name || "",
+                            type: msgData.text ? "text" : "media"
+                        }
+                    };
+
+                    admin.messaging().send(payload)
+                        .then(response => console.log("FCM sent:", response))
+                        .catch(error => console.error("FCM error:", error));
                 })
                 .catch(err => console.error("Firestore error:", err));
         }
@@ -90,7 +118,12 @@ io.on("connection", (socket) => {
 
     // Message Delivered
     socket.on("message_delivered", ({ messageId, chatId }) => {
-        socket.to(chatId).emit("message_status_update", { messageId, status: "delivered" });
+        socket.to(chatId).emit("message_status_update", { messageId, status: "delivered", chatId });
+    });
+
+    // Message Seen
+    socket.on("message_seen", ({ messageId, chatId }) => {
+        socket.to(chatId).emit("message_status_update", { messageId, status: "seen", chatId });
     });
 
     // Handle disconnect
@@ -101,6 +134,12 @@ io.on("connection", (socket) => {
             if (sid === socket.id) {
                 onlineUsers.delete(uid);
                 io.emit("status_update", { userId: uid, isOnline: false, lastSeen: Date.now() });
+                if (admin.apps.length > 0) {
+                    admin.firestore().collection('users').doc(uid).set({
+                        isOnline: false,
+                        lastSeen: admin.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true }).catch(() => {});
+                }
                 break;
             }
         }

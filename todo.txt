@@ -1,0 +1,6 @@
+Need add image uplaod option 
+showing splash screen correclty 
+showing loader in chat section correclty
+add bottom tabs option 
+notification navigation when i click on it
+facebook login option 

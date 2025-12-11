@@ -32,8 +32,6 @@ yarn-error.*
 
 # local env files
 .env*.local
-chatapp-*-firebase-adminsdk-*.json
-server/serviceAccountKey.json
 
 # typescript
 *.tsbuildinfo

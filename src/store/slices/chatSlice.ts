@@ -12,6 +12,7 @@ export interface IMessage {
     image?: string;
     sent: boolean;
     received: boolean;
+    seen: boolean;
 }
 
 interface ChatState {
@@ -40,11 +41,12 @@ const chatSlice = createSlice({
         addMessage: (state, action: PayloadAction<IMessage>) => {
             state.messages.unshift(action.payload);
         },
-        updateMessageStatus: (state, action: PayloadAction<{ _id: string, sent?: boolean, received?: boolean }>) => {
+        updateMessageStatus: (state, action: PayloadAction<{ _id: string, sent?: boolean, received?: boolean, seen?: boolean }>) => {
             const msg = state.messages.find(m => m._id === action.payload._id);
             if (msg) {
                 if (action.payload.sent !== undefined) msg.sent = action.payload.sent;
                 if (action.payload.received !== undefined) msg.received = action.payload.received;
+                if (action.payload.seen !== undefined) msg.seen = action.payload.seen;
             }
         }
     },

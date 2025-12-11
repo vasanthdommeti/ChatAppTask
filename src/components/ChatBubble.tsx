@@ -24,9 +24,9 @@ const ChatBubble = ({ message, isCurrentUser }: ChatBubbleProps) => {
                     </Text>
                     {isCurrentUser && (
                         <Ionicons
-                            name={message.received ? "checkmark-done" : "checkmark"}
+                            name={message.seen || message.received ? "checkmark-done" : "checkmark"}
                             size={14}
-                            color={message.sent ? "#4DB6AC" : "#ccc"}
+                            color={message.seen ? "#6495ED" : message.sent ? "#4DB6AC" : "#ccc"} // Blue for seen
                             style={{ marginLeft: 4 }}
                         />
                     )}
