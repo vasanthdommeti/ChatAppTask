@@ -1,7 +1,18 @@
-// ChatScreen.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
-import { KeyboardStickyView } from 'react-native-keyboard-controller';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Alert,
+  FlatList,
+  TouchableOpacity,
+  Image,
+  Keyboard,
+  Platform,
+  LayoutAnimation,
+  UIManager,
+} from 'react-native';
+import { KeyboardStickyView } from '../components/KeyboardController';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   collection,
@@ -19,18 +30,12 @@ import socketService from '../services/socketService';
 import InputToolbar from '../components/InputToolbar';
 import ChatBubble from '../components/ChatBubble';
 import ChatSkeleton from '../components/ChatSkeleton';
-import { uploadBytes, getDownloadURL, ref as storageRef, uploadString } from 'firebase/storage';
-import * as ImagePicker from 'expo-image-picker';
+import { getDownloadURL, ref as storageRef, uploadString } from 'firebase/storage';
+import { launchImageLibrary } from 'react-native-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { TouchableOpacity } from 'react-native';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { RootState } from '../store';
 import { addMessage, setMessages, updateMessageStatus } from '../store/slices/chatSlice';
-import { FlatList } from 'react-native';
-
-// Polyfill Blob/response.blob() in Expo so Firebase uploadBytes can accept a Blob.
-// Make sure expo-blob is installed in your project: `yarn add expo-blob` or `npm i expo-blob`
-import 'expo-blob';
 
 const guessContentType = (uri?: string, provided?: string | null) => {
   if (provided && provided.startsWith('image/')) return provided;
@@ -52,7 +57,12 @@ const ChatScreen = ({ route, navigation }: any) => {
   const flatListRef = useRef<any>(null);
   const [loadingMessages, setLoadingMessages] = useState(true);
   const [inputHeight, setInputHeight] = useState(72);
-  const stickyOffset = useMemo(() => ({ closed: 16, opened: insets.bottom + 16 }), [insets.bottom]);
+  const [isTyping, setIsTyping] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const stickyOffset = useMemo(() => ({
+    closed: -insets.bottom,
+    opened: 0
+  }), [insets.bottom]);
 
   if (!currentUser) {
     return null;
@@ -63,7 +73,35 @@ const ChatScreen = ({ route, navigation }: any) => {
 
   useEffect(() => {
     setLoadingMessages(true);
+    setIsTyping(false);
   }, [chatId]);
+
+  useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const animateLayout = () => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    };
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      animateLayout();
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      animateLayout();
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     socketService.connect();
@@ -107,7 +145,7 @@ const ChatScreen = ({ route, navigation }: any) => {
     const handleUserTyping = ({ userId: uid, isTyping, chatId: typingChatId }: any) => {
       if (typingChatId && typingChatId !== chatId) return;
       if (uid === userId) {
-        navigation.setOptions({ headerTitle: isTyping ? 'Typing...' : userName });
+        setIsTyping(Boolean(isTyping));
       }
     };
 
@@ -178,24 +216,13 @@ const ChatScreen = ({ route, navigation }: any) => {
 
       try {
         // Strategy: Base64 String (Bypasses all Blob/ArrayBuffer issues)
-        // Ensure image.base64 is present. If not (e.g. from pasted image), we might need another fallback, 
-        // but for ImagePicker it is guaranteed if requested.
-        let base64Data = image.base64;
+        // Ensure image.base64 is present (react-native-image-picker provides it when requested).
+        const base64Data = image.base64;
         if (!base64Data) {
-          // Fallback if base64 missing: read uri
-          const response = await fetch(image.uri);
-          const blob = await response.blob();
-          const reader = new FileReader();
-          base64Data = await new Promise((resolve) => {
-            reader.onload = () => {
-              const res = reader.result as string;
-              resolve(res.split(',')[1]); // remove prefix
-            };
-            reader.readAsDataURL(blob);
-          });
+          throw new Error('Missing image data.');
         }
 
-        await uploadString(sRef, base64Data!, 'base64', { contentType });
+        await uploadString(sRef, base64Data, 'base64', { contentType });
         imageUrl = await getDownloadURL(sRef);
       } catch (e: any) {
         console.error('Upload failed via Base64', {
@@ -203,6 +230,7 @@ const ChatScreen = ({ route, navigation }: any) => {
           code: e?.code,
           serverResponse: e?.serverResponse,
         });
+        Alert.alert('Upload failed', 'Unable to upload image. Please try again.');
         return;
       }
     }
@@ -252,21 +280,28 @@ const ChatScreen = ({ route, navigation }: any) => {
   };
 
   const handlePickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
+    const result = await launchImageLibrary({
+      mediaType: 'photo',
+      selectionLimit: 1,
+      includeBase64: true,
       quality: 0.6,
-      base64: true,
     });
 
-    if (!result.canceled && result.assets?.length) {
-      const asset = result.assets[0];
+    if (result.didCancel) return;
+    if (result.errorCode) {
+      Alert.alert('Image Picker Error', result.errorMessage || 'Unable to pick image.');
+      return;
+    }
+
+    const asset = result.assets?.[0];
+    if (asset?.uri && asset.base64) {
       handleSend('', {
         uri: asset.uri,
         base64: asset.base64,
-        mimeType: (asset as any).mimeType || (asset as any).type || undefined
+        mimeType: asset.type
       });
+    } else {
+      Alert.alert('Image Error', 'Unable to read image data.');
     }
   };
 
@@ -275,6 +310,9 @@ const ChatScreen = ({ route, navigation }: any) => {
   };
 
   const otherUser = useMemo(() => users.find(u => u.uid === userId), [users, userId]);
+  const displayName = userName || otherUser?.displayName || 'Chat';
+  const avatarUri = otherUser?.photoURL;
+  const avatarInitial = displayName?.trim()?.charAt(0)?.toUpperCase() || '?';
   const subtitle = useMemo(() => {
     if (otherUser?.isOnline) return 'Online';
     const lastSeenRaw: any = otherUser?.lastSeen;
@@ -288,16 +326,36 @@ const ChatScreen = ({ route, navigation }: any) => {
     }
     return '';
   }, [otherUser]);
+  const statusText = isTyping ? 'typing...' : subtitle;
+  const keyboardOpen = keyboardHeight > 0;
+  const keyboardPadding = keyboardOpen ? keyboardHeight : insets.bottom;
+  const listPaddingTop = inputHeight + keyboardPadding + (keyboardOpen ? 26 : 12);
+
+  useEffect(() => {
+    if (!keyboardOpen) return;
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    });
+  }, [keyboardOpen, keyboardHeight, inputHeight]);
 
   return (
-    <View style={[styles.container, { paddingBottom: insets.bottom + 16 }]}>
-      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+    <View style={styles.container}>
+      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="chevron-back" size={28} color="#fff" />
         </TouchableOpacity>
-        <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle}>{userName}</Text>
-          {subtitle ? <Text style={styles.headerSubtitle}>{subtitle}</Text> : null}
+        <View style={styles.headerCenter}>
+          {avatarUri ? (
+            <Image source={{ uri: avatarUri }} style={styles.avatar} />
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <Text style={styles.avatarText}>{avatarInitial}</Text>
+            </View>
+          )}
+          <View style={styles.headerInfo}>
+            <Text style={styles.headerTitle} numberOfLines={1}>{displayName}</Text>
+            {statusText ? <Text style={styles.headerSubtitle}>{statusText}</Text> : null}
+          </View>
         </View>
       </View>
 
@@ -312,22 +370,26 @@ const ChatScreen = ({ route, navigation }: any) => {
             renderItem={({ item }) => <ChatBubble message={item} isCurrentUser={item.user._id === currentUser!.uid} />}
             inverted
             style={styles.listContainer}
-            contentContainerStyle={[
-              styles.list,
-              { paddingBottom: inputHeight + insets.bottom + 16 }
-            ]}
+            contentContainerStyle={[styles.list, { paddingTop: listPaddingTop }]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
           />
         )}
       </View>
 
-      <KeyboardStickyView offset={stickyOffset}>
+      <KeyboardStickyView offset={stickyOffset} style={styles.inputSticky}>
         <View
-          style={[styles.inputWrapper]}
+          style={styles.inputWrapper}
           onLayout={(e) => setInputHeight(e.nativeEvent.layout.height)}
         >
-          <InputToolbar onSend={handleSend} onPickImage={handlePickImage} onTyping={handleTyping} />
+          <InputToolbar
+            onSend={handleSend}
+            onPickImage={handlePickImage}
+            onTyping={handleTyping}
+            keyboardOpen={keyboardOpen}
+          />
         </View>
       </KeyboardStickyView>
     </View>
@@ -337,49 +399,87 @@ const ChatScreen = ({ route, navigation }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F0F',
+    backgroundColor: '#0B141A',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    backgroundColor: '#1A1A1A',
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    backgroundColor: '#202C33',
     borderBottomWidth: 1,
-    borderBottomColor: '#2A2A2A',
+    borderBottomColor: '#1F2A30',
     zIndex: 10,
   },
   backButton: {
-    marginRight: 12,
+    paddingRight: 6,
+    paddingVertical: 4,
+    marginRight: 2,
+  },
+  headerCenter: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    marginRight: 10,
+    backgroundColor: '#2A3942',
+  },
+  avatarPlaceholder: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    marginRight: 10,
+    backgroundColor: '#2A3942',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    color: '#E9EDEF',
+    fontWeight: '700',
+    fontSize: 14,
   },
   headerInfo: {
     flex: 1,
   },
   headerTitle: {
-    color: 'white',
+    color: '#E9EDEF',
     fontWeight: '700',
-    fontSize: 18,
+    fontSize: 16,
   },
   headerSubtitle: {
-    color: '#A0A0A0',
-    fontSize: 12,
+    color: '#8696A0',
+    fontSize: 11,
     marginTop: 2,
   },
   list: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
   },
   listContainer: {
     flex: 1,
   },
   inputWrapper: {
-    backgroundColor: '#0F0F0F',
+    backgroundColor: '#0B141A',
     borderTopWidth: 1,
-    borderTopColor: '#1F1F1F',
+    borderTopColor: '#1F2A30',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 16,
+  },
+  inputSticky: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 20,
+    elevation: 8,
   },
   flexContainer: {
     flex: 1,
-    justifyContent: 'flex-end',
   },
 });
 

@@ -1,0 +1,11 @@
+{
+  "enabled": true,
+  "prefabPath": "/Users/rovia/.gradle/caches/modules-2/files-2.1/com.google.prefab/cli/2.1.0/aa32fec809c44fa531f01dcfb739b5b3304d3050/cli-2.1.0-all.jar",
+  "packages": [
+    "/Users/rovia/.gradle/caches/9.0.0/transforms/34481e242648137e6ce35fbd95589934/transformed/react-android-0.83.1-debug/prefab",
+    "/Users/rovia/Desktop/ChatAppRN/node_modules/react-native-reanimated/android/build/intermediates/prefab_package/debug/prefab",
+    "/Users/rovia/Desktop/ChatAppRN/node_modules/react-native-worklets/android/build/intermediates/prefab_package/debug/prefab",
+    "/Users/rovia/.gradle/caches/9.0.0/transforms/8a14c760638736beb3e8a45632c6b17d/transformed/hermes-android-0.14.0-debug/prefab",
+    "/Users/rovia/.gradle/caches/9.0.0/transforms/ab62c271087eecda55ad2ebb9cf6302d/transformed/fbjni-0.7.0/prefab"
+  ]
+}

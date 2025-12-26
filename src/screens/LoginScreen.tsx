@@ -1,18 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useDispatch, useSelector } from 'react-redux';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, FacebookAuthProvider, signInWithCredential } from 'firebase/auth';
-import * as WebBrowser from 'expo-web-browser';
-import * as Google from 'expo-auth-session/providers/google';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { LoginManager, AccessToken } from 'react-native-fbsdk-next';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, firestore } from '../config/firebase';
 import { setUser, setLoading, setError } from '../store/slices/authSlice';
 import { RootState } from '../store';
-
-WebBrowser.maybeCompleteAuthSession();
 
 const LoginScreen = () => {
     const insets = useSafeAreaInsets();
@@ -23,56 +20,20 @@ const LoginScreen = () => {
     const dispatch = useDispatch();
     const { isLoading, error } = useSelector((state: RootState) => state.auth);
 
-    // Request
-    const [request, response, promptAsync] = Google.useAuthRequest({
-        // TODO: REPlACE WITH YOUR ACTUAL CLIENT ID FROM FIREBASE CONSOLE
-        webClientId: '472937748430-4p245dojdpc4nqema2l14sb5ubvsuohs.apps.googleusercontent.com',
-        iosClientId: '472937748430-qmbj603lfuar607g37mb87p0a0spirl5.apps.googleusercontent.com',
-        androidClientId: '472937748430-4p245dojdpc4nqema2l14sb5ubvsuohs.apps.googleusercontent.com',
-    });
-
-    // Consider both Google and (future) Facebook SDK readiness; fallback timeout avoids deadlocks
     useEffect(() => {
-        if (request) setSdkInitializing(false);
-    }, [request]);
-    
+        GoogleSignin.configure({
+            // TODO: REPLACE WITH YOUR ACTUAL CLIENT ID FROM FIREBASE CONSOLE
+            webClientId: '472937748430-4p245dojdpc4nqema2l14sb5ubvsuohs.apps.googleusercontent.com',
+            iosClientId: '472937748430-qmbj603lfuar607g37mb87p0a0spirl5.apps.googleusercontent.com',
+            offlineAccess: false,
+        });
+        setSdkInitializing(false);
+    }, []);
+
     useEffect(() => {
         const timeout = setTimeout(() => setSdkInitializing(false), 2000);
         return () => clearTimeout(timeout);
     }, []);
-
-    React.useEffect(() => {
-        if (response?.type === 'success') {
-            const { id_token } = response.params;
-            const credential = GoogleAuthProvider.credential(id_token);
-            dispatch(setLoading(true));
-            signInWithCredential(auth, credential)
-                .then((userCredential) => {
-                    // Logic duplicated from handleAuth, could be refactored
-                    const user = userCredential.user;
-                    const userData = {
-                        uid: user.uid,
-                        email: user.email,
-                        displayName: user.displayName || 'Google User',
-                        photoURL: user.photoURL,
-                        isOnline: true,
-                        lastSeen: serverTimestamp(),
-                    };
-                    setDoc(doc(firestore, 'users', user.uid), userData, { merge: true });
-                    dispatch(setUser({
-                        uid: user.uid,
-                        email: user.email,
-                        displayName: userData.displayName,
-                        photoURL: userData.photoURL,
-                    }));
-                })
-                .catch((error) => {
-                    dispatch(setError(error.message));
-                    Alert.alert('Google Login Error', error.message);
-                })
-                .finally(() => dispatch(setLoading(false)));
-        }
-    }, [dispatch, response]);
 
     const handleAuth = async () => {
         if (!email || !password) {
@@ -120,11 +81,56 @@ const LoginScreen = () => {
 
     const handleSocialLogin = async (provider: string) => {
         if (provider === 'Google') {
-            if (!request) {
-                Alert.alert('Error', 'Google Login not ready. Check Client ID.');
-                return;
+            try {
+                dispatch(setLoading(true));
+                if (Platform.OS === 'android') {
+                    await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+                }
+                const userInfo = await GoogleSignin.signIn();
+                let idToken = userInfo.idToken;
+                let accessToken: string | undefined;
+
+                if (!idToken) {
+                    const tokens = await GoogleSignin.getTokens().catch(() => null);
+                    if (tokens) {
+                        idToken = tokens.idToken;
+                        accessToken = tokens.accessToken;
+                    }
+                }
+
+                if (!idToken && !accessToken) {
+                    throw new Error('Missing Google ID token');
+                }
+
+                const credential = GoogleAuthProvider.credential(idToken || undefined, accessToken);
+                const userCredential = await signInWithCredential(auth, credential);
+                const user = userCredential.user;
+
+                const userData = {
+                    uid: user.uid,
+                    email: user.email,
+                    displayName: user.displayName || 'Google User',
+                    photoURL: user.photoURL,
+                    isOnline: true,
+                    lastSeen: serverTimestamp(),
+                };
+
+                await setDoc(doc(firestore, 'users', user.uid), userData, { merge: true });
+                dispatch(setUser({
+                    uid: user.uid,
+                    email: user.email,
+                    displayName: userData.displayName,
+                    photoURL: userData.photoURL,
+                }));
+            } catch (error: any) {
+                if (error?.code === statusCodes.SIGN_IN_CANCELLED) {
+                    return;
+                }
+                dispatch(setError(error.message));
+                Alert.alert('Google Login Error', error.message || 'Unable to sign in.');
+            } finally {
+                dispatch(setLoading(false));
             }
-            promptAsync();
         } else if (provider === 'Facebook') {
             try {
                 const result = await LoginManager.logInWithPermissions(['public_profile', 'email']);

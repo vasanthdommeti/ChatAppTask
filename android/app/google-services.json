@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "472937748430",
+    "project_id": "chatapp-ccae8",
+    "storage_bucket": "chatapp-ccae8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:472937748430:android:4572c20f29c445d0aefd9f",
+        "android_client_info": {
+          "package_name": "com.vasanthdommeti9999.chatappexpo"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "472937748430-tk0lt340i69ttnt6lmnqg70tb4qpkoqc.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.vasanthdommeti9999.chatappexpo",
+            "certificate_hash": "f20d78080ba25208a021c67aa2afff96cf38fcb1"
+          }
+        },
+        {
+          "client_id": "472937748430-4p245dojdpc4nqema2l14sb5ubvsuohs.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC_t8746OE1bZoMjVA-FXtHHOIHfOE8JAo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "472937748430-4p245dojdpc4nqema2l14sb5ubvsuohs.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "472937748430-qmbj603lfuar607g37mb87p0a0spirl5.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.vasanthdommeti9999.chatappexpo"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

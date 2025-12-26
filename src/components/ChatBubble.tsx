@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Image } from 'react-native';
 import { IMessage } from '../store/slices/chatSlice';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 
 interface ChatBubbleProps {
     message: IMessage;
@@ -9,25 +9,38 @@ interface ChatBubbleProps {
 }
 
 const ChatBubble = ({ message, isCurrentUser }: ChatBubbleProps) => {
+    const hasImage = Boolean(message.image);
+    const timeLabel = new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const statusColor = message.seen
+        ? '#53BDEB'
+        : message.received || message.sent
+            ? '#A8B3BA'
+            : '#8696A0';
+
     return (
-        <View style={[styles.container, isCurrentUser ? styles.right : styles.left]}>
-            {/* Avatar could go here for left messages */}
-            <View style={[styles.bubble, isCurrentUser ? styles.bubbleRight : styles.bubbleLeft]}>
+        <View style={[styles.row, isCurrentUser ? styles.rowRight : styles.rowLeft]}>
+            <View
+                style={[
+                    styles.bubble,
+                    isCurrentUser ? styles.bubbleRight : styles.bubbleLeft,
+                    hasImage && styles.bubbleWithImage,
+                ]}
+            >
                 {message.image && (
                     <Image source={{ uri: message.image }} style={styles.image} resizeMode="cover" />
                 )}
                 {message.text ? <Text style={styles.text}>{message.text}</Text> : null}
 
-                <View style={styles.footer}>
-                    <Text style={styles.time}>
-                        {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                <View style={styles.metaRow}>
+                    <Text style={[styles.time, isCurrentUser ? styles.timeRight : styles.timeLeft]}>
+                        {timeLabel}
                     </Text>
                     {isCurrentUser && (
                         <Ionicons
-                            name={message.seen || message.received ? "checkmark-done" : "checkmark"}
+                            name={message.seen || message.received ? 'checkmark-done' : 'checkmark'}
                             size={14}
-                            color={message.seen ? "#6495ED" : message.sent ? "#4DB6AC" : "#ccc"} // Blue for seen
-                            style={{ marginLeft: 4 }}
+                            color={statusColor}
+                            style={styles.statusIcon}
                         />
                     )}
                 </View>
@@ -37,49 +50,62 @@ const ChatBubble = ({ message, isCurrentUser }: ChatBubbleProps) => {
 };
 
 const styles = StyleSheet.create({
-    container: {
-        marginBottom: 10,
+    row: {
         flexDirection: 'row',
+        marginBottom: 8,
     },
-    left: {
+    rowLeft: {
         justifyContent: 'flex-start',
     },
-    right: {
+    rowRight: {
         justifyContent: 'flex-end',
     },
     bubble: {
-        maxWidth: '80%',
+        maxWidth: '78%',
         borderRadius: 16,
-        padding: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
     },
     bubbleLeft: {
-        backgroundColor: '#2C2C2C',
-        borderTopLeftRadius: 0,
+        backgroundColor: '#1F2C34',
+        borderTopLeftRadius: 6,
     },
     bubbleRight: {
-        backgroundColor: '#6C63FF',
-        borderTopRightRadius: 0,
+        backgroundColor: '#005C4B',
+        borderTopRightRadius: 6,
+    },
+    bubbleWithImage: {
+        padding: 6,
     },
     text: {
-        color: '#fff',
+        color: '#E9EDEF',
         fontSize: 16,
+        lineHeight: 22,
     },
     image: {
-        width: 200,
-        height: 150,
-        borderRadius: 8,
-        marginBottom: 8,
+        width: 220,
+        height: 160,
+        borderRadius: 10,
+        marginBottom: 6,
     },
-    footer: {
+    metaRow: {
         flexDirection: 'row',
-        justifyContent: 'flex-end',
         alignItems: 'center',
-        marginTop: 4
+        alignSelf: 'flex-end',
+        marginTop: 4,
     },
     time: {
-        fontSize: 10,
-        color: '#rgba(255,255,255,0.7)'
-    }
+        fontSize: 11,
+    },
+    timeLeft: {
+        color: '#8696A0',
+    },
+    timeRight: {
+        color: 'rgba(233, 237, 239, 0.75)',
+    },
+    statusIcon: {
+        marginLeft: 4,
+    },
 });
 
 export default ChatBubble;

@@ -1,30 +1,27 @@
 import React, { useEffect, useRef } from 'react';
-import { AppState } from 'react-native';
+import { AppState, StatusBar, StyleSheet, View } from 'react-native';
 import { Provider, useDispatch } from 'react-redux';
-import { StatusBar } from 'expo-status-bar';
 import AppNavigator from './src/navigation/AppNavigator';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, firestore } from './src/config/firebase';
 import { setUser, setHydrated, logout } from './src/store/slices/authSlice';
 import socketService from './src/services/socketService';
 import { doc, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
-import { registerForPushNotificationsAsync } from './src/services/notificationService';
-import * as SplashScreen from 'expo-splash-screen';
+import { registerForPushNotificationsAsync, subscribeToTokenRefresh } from './src/services/notificationService';
 import { store } from './src/store';
-import * as Notifications from 'expo-notifications';
 import { navigationRef } from './src/navigation/navigationRef';
 import { useSelector } from 'react-redux';
 import { RootState } from './src/store';
-import { KeyboardProvider } from 'react-native-keyboard-controller';
-
-// Keep splash screen visible until we decide to hide
-SplashScreen.preventAutoHideAsync().catch(() => { });
+import { KeyboardProvider } from './src/components/KeyboardController';
+import messaging from '@react-native-firebase/messaging';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 // Component to handle auth state subscription
 const AuthListener = () => {
   const dispatch = useDispatch();
   const { isAuthenticated } = useSelector((state: RootState) => state.auth);
   const pendingNavigation = useRef<{ userId: string, userName?: string } | null>(null);
+  const tokenRefreshUnsub = useRef<null | (() => void)>(null);
 
   const tryNavigateToPendingChat = () => {
     if (!pendingNavigation.current) return;
@@ -44,6 +41,10 @@ const AuthListener = () => {
       if (!user) {
         dispatch(logout());
         socketService.disconnect();
+        if (tokenRefreshUnsub.current) {
+          tokenRefreshUnsub.current();
+          tokenRefreshUnsub.current = null;
+        }
         dispatch(setHydrated(true));
         return;
       }
@@ -67,6 +68,10 @@ const AuthListener = () => {
 
       // Register for push notifications (do not block UI)
       registerForPushNotificationsAsync(user.uid).catch(e => console.error('Push registration failed', e));
+      if (tokenRefreshUnsub.current) {
+        tokenRefreshUnsub.current();
+      }
+      tokenRefreshUnsub.current = subscribeToTokenRefresh(user.uid);
     });
 
     return () => unsubscribe();
@@ -74,8 +79,7 @@ const AuthListener = () => {
 
   // Handle notification taps to deep link into Chat
   useEffect(() => {
-    const responseSub = Notifications.addNotificationResponseReceivedListener(async (response) => {
-      const data: any = response.notification.request.content.data;
+    const handleOpen = async (data: any) => {
       const chatId = data?.chatId;
       const userId = data?.senderId || data?.userId;
       let userName = data?.senderName || data?.userName;
@@ -86,8 +90,8 @@ const AuthListener = () => {
         if (!userName) {
           const snap = await getDoc(doc(firestore, 'users', userId));
           if (snap.exists()) {
-            const data = snap.data() as any;
-            userName = data.displayName || data.name || userName;
+            const userData = snap.data() as any;
+            userName = userData.displayName || userData.name || userName;
           }
         }
       } catch {
@@ -96,10 +100,25 @@ const AuthListener = () => {
 
       pendingNavigation.current = { userId, userName };
       tryNavigateToPendingChat();
+    };
+
+    const unsubscribeOpened = messaging().onNotificationOpenedApp((remoteMessage) => {
+      if (remoteMessage?.data) {
+        handleOpen(remoteMessage.data);
+      }
     });
 
+    messaging()
+      .getInitialNotification()
+      .then((remoteMessage) => {
+        if (remoteMessage?.data) {
+          handleOpen(remoteMessage.data);
+        }
+      })
+      .catch(() => {});
+
     return () => {
-      responseSub.remove();
+      unsubscribeOpened();
     };
   }, [isAuthenticated]);
 
@@ -150,9 +169,20 @@ export default function App() {
   return (
     <Provider store={store}>
       <KeyboardProvider statusBarTranslucent navigationBarTranslucent>
-        <AuthListener />
-        <StatusBar style="light" />
+        <SafeAreaProvider>
+          <View style={styles.appRoot}>
+            <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
+            <AuthListener />
+          </View>
+        </SafeAreaProvider>
       </KeyboardProvider>
     </Provider>
   );
 }
+
+const styles = StyleSheet.create({
+  appRoot: {
+    flex: 1,
+    backgroundColor: '#0B141A',
+  },
+});

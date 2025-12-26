@@ -1,22 +1,23 @@
 import React, { useState } from 'react';
 import { View, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons'; // Make sure @expo/vector-icons is available (standard in Expo)
+import Ionicons from 'react-native-vector-icons/Ionicons';
 
 interface InputToolbarProps {
     onSend: (text: string) => void;
     onPickImage: () => void;
     onTyping: (text: string) => void;
+    keyboardOpen?: boolean;
 }
 
-const InputToolbar = ({ onSend, onPickImage, onTyping }: InputToolbarProps) => {
+const InputToolbar = ({ onSend, onPickImage, onTyping, keyboardOpen = false }: InputToolbarProps) => {
     const [text, setText] = useState('');
+    const hasText = text.trim().length > 0;
 
     const handleSend = () => {
-        if (text.trim()) {
-            onSend(text);
-            setText('');
-            onTyping('');
-        }
+        if (!hasText) return;
+        onSend(text);
+        setText('');
+        onTyping('');
     };
 
     const handleChange = (val: string) => {
@@ -27,20 +28,30 @@ const InputToolbar = ({ onSend, onPickImage, onTyping }: InputToolbarProps) => {
     return (
         <View style={styles.container}>
             <TouchableOpacity onPress={onPickImage} style={styles.iconButton}>
-                <Ionicons name="image-outline" size={24} color="#6C63FF" />
+                <Ionicons name="image-outline" size={22} color="#8696A0" />
             </TouchableOpacity>
 
-            <TextInput
-                style={styles.input}
-                placeholder="Type a message..."
-                placeholderTextColor="#888"
-                value={text}
-                onChangeText={handleChange}
-                multiline
-            />
+            <View style={styles.inputContainer}>
+                <TextInput
+                    style={[styles.input]}
+                    placeholder="Type a message..."
+                    placeholderTextColor="#8696A0"
+                    value={text}
+                    onChangeText={handleChange}
+                    multiline
+                    selectionColor="#25D366"
+                    keyboardAppearance="dark"
+                    textAlignVertical="center"
+                />
+            </View>
 
-            <TouchableOpacity onPress={handleSend} style={styles.sendButton}>
-                <Ionicons name="send" size={20} color="#fff" />
+            <TouchableOpacity
+                onPress={handleSend}
+                style={[styles.sendButton, !hasText && styles.sendButtonDisabled]}
+                disabled={!hasText}
+                activeOpacity={hasText ? 0.8 : 1}
+            >
+                <Ionicons name="send" size={20} color={hasText ? '#0B141A' : '#6B7A86'} />
             </TouchableOpacity>
         </View>
     );
@@ -50,32 +61,43 @@ const styles = StyleSheet.create({
     container: {
         flexDirection: 'row',
         alignItems: 'flex-end',
-        padding: 8,
-        backgroundColor: '#1E1E1E',
-        borderTopWidth: 1,
-        borderTopColor: '#333',
+        paddingHorizontal: 6,
     },
     iconButton: {
-        padding: 10,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#1F2C34',
+    },
+    inputContainer: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#1F2C34',
+        borderRadius: 22,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        marginHorizontal: 8,
     },
     input: {
         flex: 1,
-        backgroundColor: '#2C2C2C',
-        borderRadius: 20,
-        paddingHorizontal: 16,
-        paddingTop: 10,
-        paddingBottom: 10,
-        color: '#fff',
-        maxHeight: 100,
-        marginHorizontal: 8,
+        color: '#E9EDEF',
+        fontSize: 16,
+        paddingVertical: 6,
+        maxHeight: 120,
     },
     sendButton: {
-        backgroundColor: '#6C63FF',
-        borderRadius: 20,
-        width: 40,
-        height: 40,
+        backgroundColor: '#25D366',
+        borderRadius: 22,
+        width: 44,
+        height: 44,
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    sendButtonDisabled: {
+        backgroundColor: '#2A3942',
     },
 });
 

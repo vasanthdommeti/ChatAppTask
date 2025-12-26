@@ -1,19 +1,26 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React from 'react';
+import { ActivityIndicator, View } from 'react-native';
+import { DarkTheme, NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import LoginScreen from '../screens/LoginScreen';
 import UsersListScreen from '../screens/UsersListScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import ChatScreen from '../screens/ChatScreen';
-import * as SplashScreen from 'expo-splash-screen';
 import { navigationRef } from './navigationRef';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
+const navTheme = {
+    ...DarkTheme,
+    colors: {
+        ...DarkTheme.colors,
+        background: '#0B141A',
+    },
+};
 
 const MainTabs = () => {
     const unreadTotal = useSelector((state: RootState) => state.users.unreadTotal);
@@ -24,8 +31,8 @@ const MainTabs = () => {
             screenOptions={({ route }) => ({
                 headerShown: false,
                 tabBarStyle: {
-                    backgroundColor: '#121212',
-                    borderTopColor: '#1F1F1F',
+                    backgroundColor: '#202C33',
+                    borderTopColor: '#1F2A30',
                 },
                 tabBarActiveTintColor: '#6C63FF',
                 tabBarInactiveTintColor: '#888',
@@ -50,27 +57,21 @@ const MainTabs = () => {
 
 const AppNavigator = () => {
     const { isAuthenticated, hasHydrated } = useSelector((state: RootState) => state.auth);
-    const [navReady, setNavReady] = useState(false);
-    const splashHidden = useRef(false);
-
-    // Hide splash once hydration finishes
-    useEffect(() => {
-        if (hasHydrated && navReady && !splashHidden.current) {
-            SplashScreen.hideAsync().catch(() => {});
-            splashHidden.current = true;
-        }
-    }, [hasHydrated, navReady]);
 
     if (!hasHydrated) {
-        return null; // Keep native splash visible
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0B141A' }}>
+                <ActivityIndicator size="large" color="#6C63FF" />
+            </View>
+        );
     }
 
     return (
         <NavigationContainer
             ref={navigationRef}
-            onReady={() => setNavReady(true)}
+            theme={navTheme}
         >
-            <Stack.Navigator screenOptions={{ headerShown: false, cardStyle: { backgroundColor: '#121212' } }}>
+            <Stack.Navigator screenOptions={{ headerShown: false, cardStyle: { backgroundColor: '#0B141A' } }}>
                 {isAuthenticated ? (
                     <>
                         <Stack.Screen name="MainTabs" component={MainTabs} />
